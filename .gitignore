@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+
+# Environment and secrets
+.env
+deploy/deploy.settings.json
+
+# IDE
+.vscode/
+
+# Build artifacts
+out/

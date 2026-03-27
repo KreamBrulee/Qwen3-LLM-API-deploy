@@ -1,0 +1,9 @@
+{
+  "modelPath": "E:/llm/models/qwen3-14b-q4_k_m.gguf",
+  "llamaServerPath": "E:/llm/bin/llama-server.exe",
+  "llamaPort": 8080,
+  "proxyPort": 8001,
+  "tunnelName": "replace-with-cloudflare-tunnel-name",
+  "publicHostname": "llm-api.example.com",
+  "allowedModel": "qwen3-14b-q4_k_m"
+}
