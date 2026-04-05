@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m uvicorn api.proxy.main:app --host 127.0.0.1 --port 8001)",
+      "Bash(curl -s http://127.0.0.1:8001/healthz)",
+      "Bash(kill %1)"
+    ]
+  }
+}

@@ -1,10 +1,9 @@
-from __future__ import annotations
-
 import time
 from typing import Any
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
@@ -17,6 +16,13 @@ from .schemas import ChatCompletionsRequest
 limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Qwen Proxy API", version="0.1.0")
 app.state.limiter = limiter
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["POST", "GET", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 
 @app.exception_handler(RateLimitExceeded)
@@ -66,7 +72,7 @@ async def healthz() -> dict[str, str]:
 
 
 @app.get("/v1/models")
-@limiter.limit(lambda: f"{settings.requests_per_minute}/minute")
+@limiter.limit(f"{settings.requests_per_minute}/minute")
 async def list_models(request: Request, _: str = Depends(verify_api_key)) -> Any:
     timeout = httpx.Timeout(settings.request_timeout_seconds)
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -75,10 +81,10 @@ async def list_models(request: Request, _: str = Depends(verify_api_key)) -> Any
 
 
 @app.post("/v1/chat/completions")
-@limiter.limit(lambda: f"{settings.requests_per_minute}/minute")
+@limiter.limit(f"{settings.requests_per_minute}/minute")
 async def chat_completions(
     request: Request,
-    payload: ChatCompletionsRequest,
+    payload: ChatCompletionsRequest = Body(...),
     _: str = Depends(verify_api_key),
 ) -> Any:
     validate_request_payload(payload)
@@ -97,7 +103,15 @@ async def chat_completions(
                     async for chunk in response.aiter_bytes():
                         yield chunk
 
-        return StreamingResponse(streamer(), media_type="text/event-stream")
+        return StreamingResponse(
+            streamer(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         upstream = await client.post(url, json=payload.model_dump(exclude_none=True))
