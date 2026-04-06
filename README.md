@@ -4,8 +4,9 @@ This repository gives you a performance-first implementation for running Qwen 3 
 
 ## Architecture
 - `llama.cpp` (`llama-server`) hosts the model on `127.0.0.1:8080`
-- `FastAPI` proxy on `127.0.0.1:8001` adds auth, request limits, and payload guardrails
+- `FastAPI` proxy on `127.0.0.1:8001` adds user auth, persistent history, request limits, and payload guardrails
 - `cloudflared` tunnel publishes your domain to the proxy without opening router ports
+- `StackMind` frontend (`new-frontend-client/`) is the primary UI — open with `python -m http.server 5500` from that folder
 
 ## 1) Prerequisites
 - Windows with NVIDIA GPU (12 GB VRAM)
@@ -25,9 +26,9 @@ Copy-Item .env.example .env
 ```
 
 Edit `.env` and set at minimum:
-- `API_KEYS`
-- `ALLOWED_MODEL`
-- Optional limits and timeout values
+- `API_KEYS` — comma-separated static bearer tokens (still work alongside user accounts)
+- `ALLOWED_MODEL` — e.g. `qwen3-14b-q4_k_m`
+- Optional: `DB_PATH` (default `stackmind.db`), `HISTORY_CONTEXT_MESSAGES` (default `20`), `SESSION_TTL_DAYS` (default `30`)
 
 ## 3) Start llama.cpp server
 Put `llama-server.exe` in `./bin` and run:
@@ -86,8 +87,34 @@ Use task registration script (PowerShell as Administrator):
   -TunnelCommand "cd e:\Kunal\VS_shit\LLM-deploy; .\scripts\start-cloudflared.ps1 -TunnelName '<your-tunnel-name>'"
 ```
 
+## User accounts
+
+The proxy stores users, sessions, and conversation history in `stackmind.db` (SQLite, created automatically on first start).
+
+**Register via the UI** — open StackMind in the browser, use the Sign In / Register overlay.
+
+**Register via API** (PowerShell):
+```powershell
+$b = @{ username = "kunal"; password = "yourpassword" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8001/auth/register" -Body $b -ContentType "application/json"
+```
+
+**List users in the DB**:
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -c "import sqlite3; [print(r) for r in sqlite3.connect('stackmind.db').execute('SELECT id,username FROM users')]"
+```
+
+**Delete a user**:
+```powershell
+python -c "import sqlite3; db=sqlite3.connect('stackmind.db'); db.execute('DELETE FROM users WHERE username=?',('username_here',)); db.commit()"
+```
+
+When a user logs in, their last 20 messages (configurable via `HISTORY_CONTEXT_MESSAGES`) are automatically injected as context into every new request.
+
 ## Security defaults in this implementation
-- Bearer token auth required (`API_KEYS`)
+- User account auth (register/login) with session tokens stored in `stackmind.db`
+- Static `API_KEYS` from `.env` still accepted (backward compatible)
 - Local bind only (`127.0.0.1`)
 - Prompt length and max tokens checks
 - Request rate limiting
@@ -150,8 +177,15 @@ Detailed endpoint guide and request examples:
 
 - [docs/api-reference.md](docs/api-reference.md)
 
-## Simple frontend client
+## Frontend (StackMind)
 
-Isolated browser UI that calls your domain API:
+The primary UI is in `new-frontend-client/`. Serve it locally:
 
-- [frontend-client/README.md](frontend-client/README.md)
+```powershell
+cd new-frontend-client
+python -m http.server 5500
+```
+
+Then open `http://localhost:5500` in your browser. Set the API Base URL to `http://127.0.0.1:8001` (or your Cloudflare domain) in the Admin or Config section.
+
+The old minimal client is in `frontend-client/` for reference.

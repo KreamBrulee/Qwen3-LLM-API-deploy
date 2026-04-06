@@ -1,6 +1,11 @@
+import asyncio
+import sqlite3
 import time
-from typing import Any
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from typing import Any, Optional
 
+import aiosqlite
 import httpx
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,11 +15,42 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from .config import settings
-from .schemas import ChatCompletionsRequest
+from .database import (
+    create_session,
+    create_user,
+    delete_session,
+    extract_tokens_from_chunk,
+    get_db_dep,
+    get_history_for_display,
+    get_recent_messages,
+    get_user_by_id,
+    get_user_by_username,
+    init_db,
+    save_message_pair,
+    save_turn_background,
+    _verify_password,
+)
+from .schemas import (
+    AuthResponse,
+    ChatCompletionsRequest,
+    HistoryMessage,
+    HistoryResponse,
+    LoginRequest,
+    Message,
+    RegisterRequest,
+)
+
+
+# ── App setup ─────────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()
+    yield
 
 
 limiter = Limiter(key_func=get_remote_address)
-app = FastAPI(title="Qwen Proxy API", version="0.1.0")
+app = FastAPI(title="Qwen Proxy API", version="0.2.0", lifespan=lifespan)
 app.state.limiter = limiter
 
 app.add_middleware(
@@ -40,17 +76,38 @@ async def rate_limit_exceeded_handler(_: Request, exc: RateLimitExceeded) -> JSO
     )
 
 
-def verify_api_key(authorization: str | None = Header(default=None)) -> str:
-    if not settings.api_keys:
-        raise HTTPException(status_code=500, detail="API_KEYS is not configured")
+# ── Auth dependency ───────────────────────────────────────────────────────────
+
+@dataclass
+class AuthResult:
+    token: str
+    user_id: Optional[int]  # None when authenticated via static API key
+    is_user_session: bool
+
+
+async def verify_api_key(
+    authorization: str | None = Header(default=None),
+    db: aiosqlite.Connection = Depends(get_db_dep),
+) -> AuthResult:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
 
     token = authorization.removeprefix("Bearer ").strip()
-    if token not in settings.api_keys:
-        raise HTTPException(status_code=401, detail="Invalid bearer token")
-    return token
 
+    # Path 1: static API key (O(1), no DB hit)
+    if settings.api_keys and token in settings.api_keys:
+        return AuthResult(token=token, user_id=None, is_user_session=False)
+
+    # Path 2: user session token
+    from .database import get_session
+    session = await get_session(db, token)
+    if session:
+        return AuthResult(token=token, user_id=session["user_id"], is_user_session=True)
+
+    raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
+# ── Payload validation ────────────────────────────────────────────────────────
 
 def validate_request_payload(payload: ChatCompletionsRequest) -> None:
     if not payload.messages:
@@ -66,42 +123,145 @@ def validate_request_payload(payload: ChatCompletionsRequest) -> None:
         raise HTTPException(status_code=400, detail=f"Only model '{settings.allowed_model}' is allowed")
 
 
+# ── Public endpoints ──────────────────────────────────────────────────────────
+
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# ── Auth routes ───────────────────────────────────────────────────────────────
+
+@app.post("/auth/register", response_model=AuthResponse)
+async def register(
+    payload: RegisterRequest = Body(...),
+    db: aiosqlite.Connection = Depends(get_db_dep),
+) -> AuthResponse:
+    try:
+        user_id = await create_user(db, payload.username, payload.password)
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="Username already taken")
+    token = await create_session(db, user_id)
+    return AuthResponse(token=token, username=payload.username, user_id=user_id)
+
+
+@app.post("/auth/login", response_model=AuthResponse)
+async def login(
+    payload: LoginRequest = Body(...),
+    db: aiosqlite.Connection = Depends(get_db_dep),
+) -> AuthResponse:
+    user = await get_user_by_username(db, payload.username)
+    if not user or not _verify_password(payload.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = await create_session(db, user["id"])
+    return AuthResponse(token=token, username=user["username"], user_id=user["id"])
+
+
+@app.post("/auth/logout")
+async def logout(
+    auth: AuthResult = Depends(verify_api_key),
+    db: aiosqlite.Connection = Depends(get_db_dep),
+) -> dict:
+    if auth.is_user_session:
+        await delete_session(db, auth.token)
+    return {"ok": True}
+
+
+# ── History endpoint ──────────────────────────────────────────────────────────
+
+@app.get("/v1/history", response_model=HistoryResponse)
+async def get_history(
+    auth: AuthResult = Depends(verify_api_key),
+    db: aiosqlite.Connection = Depends(get_db_dep),
+) -> HistoryResponse:
+    if not auth.is_user_session:
+        raise HTTPException(status_code=403, detail="History requires a user session token")
+    rows = await get_history_for_display(db, auth.user_id, limit=50)
+    user = await get_user_by_id(db, auth.user_id)
+    return HistoryResponse(
+        messages=[HistoryMessage(**r) for r in rows],
+        username=user["username"] if user else "",
+    )
+
+
+# ── Model list ────────────────────────────────────────────────────────────────
+
 @app.get("/v1/models")
 @limiter.limit(f"{settings.requests_per_minute}/minute")
-async def list_models(request: Request, _: str = Depends(verify_api_key)) -> Any:
+async def list_models(request: Request, _: AuthResult = Depends(verify_api_key)) -> Any:
     timeout = httpx.Timeout(settings.request_timeout_seconds)
     async with httpx.AsyncClient(timeout=timeout) as client:
         upstream = await client.get(f"{settings.llama_base_url}/v1/models")
     return JSONResponse(status_code=upstream.status_code, content=upstream.json())
 
 
+# ── Chat completions ──────────────────────────────────────────────────────────
+
 @app.post("/v1/chat/completions")
 @limiter.limit(f"{settings.requests_per_minute}/minute")
 async def chat_completions(
     request: Request,
     payload: ChatCompletionsRequest = Body(...),
-    _: str = Depends(verify_api_key),
+    auth: AuthResult = Depends(verify_api_key),
+    db: aiosqlite.Connection = Depends(get_db_dep),
 ) -> Any:
     validate_request_payload(payload)
+
+    # ── History context injection ─────────────────────────────────────────────
+    user_content_for_save: str | None = None
+
+    if auth.is_user_session:
+        # Capture the latest user message before we mutate the payload
+        user_msgs = [m for m in payload.messages if m.role == "user"]
+        if user_msgs:
+            user_content_for_save = user_msgs[-1].content
+
+        history = await get_recent_messages(
+            db, auth.user_id, limit=settings.history_context_messages
+        )
+        if history:
+            sys_msgs = [m for m in payload.messages if m.role == "system"]
+            non_sys_msgs = [m for m in payload.messages if m.role != "system"]
+            history_msgs = [Message(role=r["role"], content=r["content"]) for r in history]
+            payload = payload.model_copy(
+                update={"messages": sys_msgs + history_msgs + non_sys_msgs}
+            )
+
     url = f"{settings.llama_base_url}/v1/chat/completions"
     timeout = httpx.Timeout(settings.request_timeout_seconds)
-
     start = time.perf_counter()
 
+    # ── Streaming path ────────────────────────────────────────────────────────
     if payload.stream:
+        accumulated: list[str] = []
+        _user_id = auth.user_id
+        _user_content = user_content_for_save
+        _is_user = auth.is_user_session
+
         async def streamer() -> Any:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream("POST", url, json=payload.model_dump(exclude_none=True)) as response:
+                async with client.stream(
+                    "POST", url, json=payload.model_dump(exclude_none=True)
+                ) as response:
                     if response.status_code >= 400:
                         detail = await response.aread()
-                        raise HTTPException(status_code=response.status_code, detail=detail.decode("utf-8", errors="ignore"))
+                        raise HTTPException(
+                            status_code=response.status_code,
+                            detail=detail.decode("utf-8", errors="ignore"),
+                        )
                     async for chunk in response.aiter_bytes():
+                        extract_tokens_from_chunk(chunk, accumulated)
                         yield chunk
+
+            # Stream finished — fire-and-forget DB save
+            if _is_user and _user_content:
+                assistant_text = "".join(accumulated)
+                if assistant_text:
+                    asyncio.create_task(
+                        save_turn_background(
+                            settings.db_path, _user_id, _user_content, assistant_text
+                        )
+                    )
 
         return StreamingResponse(
             streamer(),
@@ -113,11 +273,22 @@ async def chat_completions(
             },
         )
 
+    # ── Non-streaming path ────────────────────────────────────────────────────
     async with httpx.AsyncClient(timeout=timeout) as client:
         upstream = await client.post(url, json=payload.model_dump(exclude_none=True))
 
     latency_ms = int((time.perf_counter() - start) * 1000)
     content = upstream.json()
+
+    if auth.is_user_session and user_content_for_save and upstream.status_code < 400:
+        assistant_text = (
+            content.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+        )
+        if assistant_text:
+            await save_message_pair(db, auth.user_id, user_content_for_save, assistant_text)
+
     if isinstance(content, dict):
         content.setdefault("proxy_metadata", {})
         if isinstance(content["proxy_metadata"], dict):

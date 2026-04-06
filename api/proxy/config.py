@@ -28,10 +28,17 @@ class Settings:
     max_tokens_per_request: int = _int_env("MAX_TOKENS_PER_REQUEST", 1024)
     request_timeout_seconds: int = _int_env("REQUEST_TIMEOUT_SECONDS", 120)
     allowed_model: str = os.getenv("ALLOWED_MODEL", "").strip()
+    db_path: str = os.getenv("DB_PATH", "stackmind.db")
+    history_context_messages: int = _int_env("HISTORY_CONTEXT_MESSAGES", 20)
+    session_ttl_days: int = _int_env("SESSION_TTL_DAYS", 30)
 
     @property
     def api_keys(self) -> set[str]:
         return {key.strip() for key in self.api_keys_raw.split(",") if key.strip()}
+
+    @property
+    def session_ttl_seconds(self) -> int:
+        return self.session_ttl_days * 86400
 
 
 settings = Settings()

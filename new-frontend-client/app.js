@@ -62,11 +62,26 @@ const ovModelEl       = document.getElementById("ov-model");
 const ovHealthEl      = document.getElementById("ov-health");
 const ovReqsEl        = document.getElementById("ov-reqs");
 
+// Auth element refs
+const authOverlayEl    = document.getElementById("authOverlay");
+const tabLoginEl       = document.getElementById("tabLogin");
+const tabRegisterEl    = document.getElementById("tabRegister");
+const loginFormEl      = document.getElementById("loginForm");
+const registerFormEl   = document.getElementById("registerForm");
+const loginUsernameEl  = document.getElementById("loginUsername");
+const loginPasswordEl  = document.getElementById("loginPassword");
+const regUsernameEl    = document.getElementById("regUsername");
+const regPasswordEl    = document.getElementById("regPassword");
+const authErrorEl      = document.getElementById("authError");
+const logoutBtnEl      = document.getElementById("logoutBtn");
+const userPillEl       = document.getElementById("userPill");
+
 // ── State ─────────────────────────────────────────────
 let msgCount    = 0;
 let toastTimer  = null;
 let lastRaw     = "—";
 let lastSearch  = "";
+let currentUser = null;  // { token, username, user_id } or null
 
 // ── Toast ─────────────────────────────────────────────
 function showToast(msg, type = "info", duration = 2800) {
@@ -104,7 +119,7 @@ function getBaseUrl() {
 }
 
 function getAuthHeaders(includeJson = false) {
-  const key = apiKeyEl.value.trim();
+  const key = currentUser ? currentUser.token : apiKeyEl.value.trim();
   const headers = { Authorization: `Bearer ${key}` };
   if (includeJson) headers["Content-Type"] = "application/json";
   return headers;
@@ -584,5 +599,143 @@ clearAdminLogBtn.addEventListener("click", () => {
 // ── Sync admin inputs → live ──────────────────────────
 [apiBaseEl, modelEl].forEach(el => el.addEventListener("input", syncDashboard));
 
+// ── Auth overlay ──────────────────────────────────────
+tabLoginEl.addEventListener("click", () => {
+  tabLoginEl.classList.add("active");
+  tabRegisterEl.classList.remove("active");
+  loginFormEl.style.display    = "";
+  registerFormEl.style.display = "none";
+  authErrorEl.style.display    = "none";
+});
+
+tabRegisterEl.addEventListener("click", () => {
+  tabRegisterEl.classList.add("active");
+  tabLoginEl.classList.remove("active");
+  registerFormEl.style.display = "";
+  loginFormEl.style.display    = "none";
+  authErrorEl.style.display    = "none";
+});
+
+function showAuthError(msg) {
+  authErrorEl.textContent   = msg;
+  authErrorEl.style.display = "block";
+}
+
+loginFormEl.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const username = loginUsernameEl.value.trim();
+  const password = loginPasswordEl.value;
+  if (!username || !password) { showAuthError("Fill in all fields."); return; }
+  loginFormEl.querySelector("button[type=submit]").textContent = "Signing in…";
+  try {
+    const data = await callJson("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    await onLoginSuccess(data);
+  } catch (err) {
+    showAuthError(err.message.includes("401") ? "Invalid credentials." : err.message);
+  } finally {
+    loginFormEl.querySelector("button[type=submit]").textContent = "Sign In";
+  }
+});
+
+registerFormEl.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const username = regUsernameEl.value.trim();
+  const password = regPasswordEl.value;
+  if (!username || !password) { showAuthError("Fill in all fields."); return; }
+  if (password.length < 8)    { showAuthError("Password must be at least 8 characters."); return; }
+  registerFormEl.querySelector("button[type=submit]").textContent = "Creating…";
+  try {
+    const data = await callJson("/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    await onLoginSuccess(data);
+  } catch (err) {
+    showAuthError(err.message.includes("409") ? "Username already taken." : err.message);
+  } finally {
+    registerFormEl.querySelector("button[type=submit]").textContent = "Create Account";
+  }
+});
+
+async function onLoginSuccess(data) {
+  currentUser = { token: data.token, username: data.username, user_id: data.user_id };
+  sessionStorage.setItem("sm_token",    data.token);
+  sessionStorage.setItem("sm_username", data.username);
+  sessionStorage.setItem("sm_user_id",  String(data.user_id));
+
+  authOverlayEl.style.display = "none";
+  userPillEl.style.display    = "";
+  userPillEl.textContent      = data.username;
+  logoutBtnEl.style.display   = "";
+
+  showToast(`Welcome, ${data.username}`, "success");
+  await loadAndRenderHistory();
+}
+
+function restoreSession() {
+  const token    = sessionStorage.getItem("sm_token");
+  const username = sessionStorage.getItem("sm_username");
+  const user_id  = sessionStorage.getItem("sm_user_id");
+  if (token && username && user_id) {
+    currentUser = { token, username, user_id: Number(user_id) };
+    authOverlayEl.style.display = "none";
+    userPillEl.style.display    = "";
+    userPillEl.textContent      = username;
+    logoutBtnEl.style.display   = "";
+    return true;
+  }
+  return false;
+}
+
+logoutBtnEl.addEventListener("click", async () => {
+  try {
+    await callJson("/auth/logout", { method: "POST", headers: getAuthHeaders(false) });
+  } catch { /* ignore errors on logout */ }
+  currentUser = null;
+  sessionStorage.removeItem("sm_token");
+  sessionStorage.removeItem("sm_username");
+  sessionStorage.removeItem("sm_user_id");
+  authOverlayEl.style.display = "";
+  userPillEl.style.display    = "none";
+  logoutBtnEl.style.display   = "none";
+  chatMessagesEl.innerHTML    = "";
+  const empty = document.createElement("div");
+  empty.className = "chat-empty"; empty.id = "chatEmpty";
+  empty.innerHTML = `<div class="chat-empty-icon"><svg width="36" height="36" viewBox="0 0 36 36" fill="none"><path d="M32 4H4a2 2 0 00-2 2v18a2 2 0 002 2h6l4.5 5.5L19 26h13a2 2 0 002-2V6a2 2 0 00-2-2z" stroke="var(--accent)" stroke-width="1.4" stroke-linejoin="round"/><path d="M10 14h16M10 19h10" stroke="var(--accent)" stroke-width="1.4" stroke-linecap="round" opacity="0.5"/></svg></div><p class="chat-empty-title">Start a conversation</p><p class="chat-empty-sub">Type below and press Enter or click Send</p>`;
+  chatMessagesEl.appendChild(empty);
+  msgCount = 0;
+  syncDashboard();
+  showToast("Logged out", "info");
+});
+
+// ── History ───────────────────────────────────────────
+async function loadAndRenderHistory() {
+  try {
+    const data = await callJson("/v1/history", {
+      method: "GET",
+      headers: getAuthHeaders(false),
+    });
+    const msgs = [...data.messages].reverse();
+    if (msgs.length === 0) return;
+    document.getElementById("chatEmpty")?.remove();
+    msgs.forEach(m => appendMessage(m.role === "assistant" ? "assist" : m.role, m.content));
+    msgCount = msgs.filter(m => m.role === "user").length;
+    syncDashboard();
+    showToast(`Loaded ${msgs.length} history messages`, "info");
+  } catch (err) {
+    console.warn("History load failed:", err.message);
+  }
+}
+
 // ── Init ──────────────────────────────────────────────
-syncDashboard();
+(async function init() {
+  syncDashboard();
+  if (restoreSession()) {
+    await loadAndRenderHistory();
+  }
+})();

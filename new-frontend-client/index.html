@@ -9,6 +9,68 @@
 </head>
 <body>
 
+<!-- ── AUTH OVERLAY ────────────────────────────────── -->
+<div class="auth-overlay" id="authOverlay">
+  <div class="auth-card panel">
+    <div class="auth-logo">
+      <div class="logo-mark">
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+          <rect x="2" y="2" width="8" height="8" rx="2" fill="var(--accent)"/>
+          <rect x="12" y="2" width="8" height="8" rx="2" fill="var(--accent)" opacity="0.45"/>
+          <rect x="2" y="12" width="8" height="8" rx="2" fill="var(--accent)" opacity="0.45"/>
+          <rect x="12" y="12" width="8" height="8" rx="2" fill="var(--accent)" opacity="0.75"/>
+        </svg>
+      </div>
+      <span class="logo-text">StackMind</span>
+    </div>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="tabLogin" type="button">Sign In</button>
+      <button class="auth-tab" id="tabRegister" type="button">Register</button>
+    </div>
+
+    <div id="authError" class="auth-error" style="display:none;"></div>
+
+    <!-- Login form -->
+    <form id="loginForm" class="field-stack auth-form">
+      <div class="field">
+        <label for="loginUsername">Username</label>
+        <div class="input-wrap">
+          <input id="loginUsername" type="text" placeholder="your_username" autocomplete="username"/>
+        </div>
+      </div>
+      <div class="field">
+        <label for="loginPassword">Password</label>
+        <div class="input-wrap">
+          <input id="loginPassword" type="password" placeholder="••••••••" autocomplete="current-password"/>
+        </div>
+      </div>
+      <div class="field-actions">
+        <button class="primary-btn full" type="submit" id="loginSubmitBtn">Sign In</button>
+      </div>
+    </form>
+
+    <!-- Register form -->
+    <form id="registerForm" class="field-stack auth-form" style="display:none;">
+      <div class="field">
+        <label for="regUsername">Username</label>
+        <div class="input-wrap">
+          <input id="regUsername" type="text" placeholder="your_username" autocomplete="username"/>
+        </div>
+      </div>
+      <div class="field">
+        <label for="regPassword">Password</label>
+        <div class="input-wrap">
+          <input id="regPassword" type="password" placeholder="Min 8 characters" autocomplete="new-password"/>
+        </div>
+      </div>
+      <div class="field-actions">
+        <button class="primary-btn full" type="submit" id="registerSubmitBtn">Create Account</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="bg-grid"></div>
 <div class="bg-glow"></div>
 
@@ -100,6 +162,8 @@
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="4.5" height="4.5" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="7.5" y="1" width="4.5" height="4.5" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="1" y="7.5" width="4.5" height="4.5" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="7.5" y="7.5" width="4.5" height="4.5" rx="1" stroke="currentColor" stroke-width="1.3"/></svg>
           Models
         </button>
+        <span class="tb-user-pill" id="userPill" style="display:none;"></span>
+        <button class="tb-btn" id="logoutBtn" type="button" style="display:none;">Logout</button>
       </div>
     </header>
 
