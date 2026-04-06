@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sqlite3
 import time
 from contextlib import asynccontextmanager
@@ -19,14 +20,13 @@ from .database import (
     create_session,
     create_user,
     delete_session,
-    extract_tokens_from_chunk,
     get_db_dep,
     get_history_for_display,
     get_recent_messages,
+    get_summary,
     get_user_by_id,
     get_user_by_username,
     init_db,
-    save_message_pair,
     save_turn_background,
     _verify_password,
 )
@@ -83,6 +83,7 @@ class AuthResult:
     token: str
     user_id: Optional[int]  # None when authenticated via static API key
     is_user_session: bool
+    is_admin: bool
 
 
 async def verify_api_key(
@@ -94,15 +95,20 @@ async def verify_api_key(
 
     token = authorization.removeprefix("Bearer ").strip()
 
-    # Path 1: static API key (O(1), no DB hit)
+    # Path 1: static API key — treated as admin (configured in .env)
     if settings.api_keys and token in settings.api_keys:
-        return AuthResult(token=token, user_id=None, is_user_session=False)
+        return AuthResult(token=token, user_id=None, is_user_session=False, is_admin=True)
 
     # Path 2: user session token
     from .database import get_session
     session = await get_session(db, token)
     if session:
-        return AuthResult(token=token, user_id=session["user_id"], is_user_session=True)
+        return AuthResult(
+            token=token,
+            user_id=session["user_id"],
+            is_user_session=True,
+            is_admin=bool(session["is_admin"]),
+        )
 
     raise HTTPException(status_code=401, detail="Invalid or expired token")
 
@@ -137,12 +143,13 @@ async def register(
     payload: RegisterRequest = Body(...),
     db: aiosqlite.Connection = Depends(get_db_dep),
 ) -> AuthResponse:
+    is_admin = payload.username in settings.admin_usernames
     try:
-        user_id = await create_user(db, payload.username, payload.password)
+        user_id = await create_user(db, payload.username, payload.password, is_admin=is_admin)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="Username already taken")
     token = await create_session(db, user_id)
-    return AuthResponse(token=token, username=payload.username, user_id=user_id)
+    return AuthResponse(token=token, username=payload.username, user_id=user_id, is_admin=is_admin)
 
 
 @app.post("/auth/login", response_model=AuthResponse)
@@ -154,7 +161,12 @@ async def login(
     if not user or not _verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = await create_session(db, user["id"])
-    return AuthResponse(token=token, username=user["username"], user_id=user["id"])
+    return AuthResponse(
+        token=token,
+        username=user["username"],
+        user_id=user["id"],
+        is_admin=bool(user["is_admin"]),
+    )
 
 
 @app.post("/auth/logout")
@@ -219,13 +231,23 @@ async def chat_completions(
         history = await get_recent_messages(
             db, auth.user_id, limit=settings.history_context_messages
         )
-        if history:
-            sys_msgs = [m for m in payload.messages if m.role == "system"]
-            non_sys_msgs = [m for m in payload.messages if m.role != "system"]
-            history_msgs = [Message(role=r["role"], content=r["content"]) for r in history]
-            payload = payload.model_copy(
-                update={"messages": sys_msgs + history_msgs + non_sys_msgs}
-            )
+        summary = await get_summary(db, auth.user_id)
+
+        sys_msgs     = [m for m in payload.messages if m.role == "system"]
+        non_sys_msgs = [m for m in payload.messages if m.role != "system"]
+        history_msgs = [Message(role=r["role"], content=r["content"]) for r in history]
+
+        # Prepend compressed summary of older messages as a system note
+        summary_msgs: list[Message] = []
+        if summary:
+            summary_msgs = [Message(
+                role="system",
+                content=f"[Summary of earlier conversation]\n{summary['content']}",
+            )]
+
+        payload = payload.model_copy(
+            update={"messages": sys_msgs + summary_msgs + history_msgs + non_sys_msgs}
+        )
 
     url = f"{settings.llama_base_url}/v1/chat/completions"
     timeout = httpx.Timeout(settings.request_timeout_seconds)
@@ -249,9 +271,20 @@ async def chat_completions(
                             status_code=response.status_code,
                             detail=detail.decode("utf-8", errors="ignore"),
                         )
-                    async for chunk in response.aiter_bytes():
-                        extract_tokens_from_chunk(chunk, accumulated)
-                        yield chunk
+                    async for raw in response.aiter_bytes():
+                        # Accumulate real content tokens for DB save
+                        for line in raw.decode("utf-8", errors="ignore").split("\n"):
+                            line = line.strip()
+                            if not line.startswith("data: ") or line[6:] in ("[DONE]", ""):
+                                continue
+                            try:
+                                delta = json.loads(line[6:])["choices"][0]["delta"]
+                                token = delta.get("content") or ""
+                                if token:
+                                    accumulated.append(token)
+                            except Exception:
+                                pass
+                        yield raw  # pass through immediately, no filtering
 
             # Stream finished — fire-and-forget DB save
             if _is_user and _user_content:
@@ -287,7 +320,11 @@ async def chat_completions(
             .get("content", "")
         )
         if assistant_text:
-            await save_message_pair(db, auth.user_id, user_content_for_save, assistant_text)
+            asyncio.create_task(
+                save_turn_background(
+                    settings.db_path, auth.user_id, user_content_for_save, assistant_text
+                )
+            )
 
     if isinstance(content, dict):
         content.setdefault("proxy_metadata", {})

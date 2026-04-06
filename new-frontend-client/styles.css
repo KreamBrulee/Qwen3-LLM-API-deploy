@@ -805,6 +805,34 @@ input, textarea { font-family: var(--font-ui); }
   30%         { transform: translateY(-6px); }
 }
 
+/* Reasoning / thinking trace (Qwen3 think mode) */
+.thinking-reasoning {
+  font-size: 0.78rem;
+  color: var(--muted);
+  max-width: 100%;
+}
+.thinking-reasoning summary {
+  cursor: pointer;
+  user-select: none;
+  color: var(--accent);
+  font-weight: 500;
+  padding: 2px 0;
+}
+.thinking-reasoning-text {
+  margin: 6px 0 0 0;
+  padding: 8px 10px;
+  background: var(--surface);
+  border-left: 2px solid var(--border);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: inherit;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
 /* Composer */
 .chat-composer {
   border-top: 1px solid var(--border);

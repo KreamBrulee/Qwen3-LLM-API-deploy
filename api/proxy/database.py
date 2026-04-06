@@ -6,6 +6,7 @@ import time
 from typing import AsyncGenerator, Optional
 
 import aiosqlite
+import httpx
 
 from .config import settings
 
@@ -17,6 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT    NOT NULL UNIQUE,
     password_hash TEXT    NOT NULL,
+    is_admin      INTEGER NOT NULL DEFAULT 0,
     created_at    REAL    NOT NULL
 );
 
@@ -35,6 +37,13 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at REAL    NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS summaries (
+    user_id        INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    content        TEXT    NOT NULL,
+    covered_count  INTEGER NOT NULL,
+    updated_at     REAL    NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_user_time
     ON messages(user_id, created_at DESC);
 
@@ -46,7 +55,12 @@ CREATE INDEX IF NOT EXISTS idx_sessions_token
 async def init_db() -> None:
     async with aiosqlite.connect(settings.db_path) as db:
         await db.executescript(_DDL)
-        await db.commit()
+        # Migration: add is_admin column to existing databases
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
+            await db.commit()
+        except Exception:
+            pass  # Column already exists
 
 
 # ── Per-request dependency ────────────────────────────────────────────────────
@@ -79,12 +93,14 @@ def _verify_password(password: str, stored: str) -> bool:
 
 # ── User CRUD ─────────────────────────────────────────────────────────────────
 
-async def create_user(db: aiosqlite.Connection, username: str, password: str) -> int:
+async def create_user(
+    db: aiosqlite.Connection, username: str, password: str, is_admin: bool = False
+) -> int:
     """Insert a new user. Raises sqlite3.IntegrityError if username is taken."""
     password_hash = _hash_password(password)
     cursor = await db.execute(
-        "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
-        (username, password_hash, time.time()),
+        "INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?)",
+        (username, password_hash, int(is_admin), time.time()),
     )
     await db.commit()
     return cursor.lastrowid
@@ -92,7 +108,7 @@ async def create_user(db: aiosqlite.Connection, username: str, password: str) ->
 
 async def get_user_by_username(db: aiosqlite.Connection, username: str) -> Optional[dict]:
     async with db.execute(
-        "SELECT id, username, password_hash FROM users WHERE username = ?", (username,)
+        "SELECT id, username, password_hash, is_admin FROM users WHERE username = ?", (username,)
     ) as cursor:
         row = await cursor.fetchone()
     return dict(row) if row else None
@@ -100,7 +116,7 @@ async def get_user_by_username(db: aiosqlite.Connection, username: str) -> Optio
 
 async def get_user_by_id(db: aiosqlite.Connection, user_id: int) -> Optional[dict]:
     async with db.execute(
-        "SELECT id, username FROM users WHERE id = ?", (user_id,)
+        "SELECT id, username, is_admin FROM users WHERE id = ?", (user_id,)
     ) as cursor:
         row = await cursor.fetchone()
     return dict(row) if row else None
@@ -121,7 +137,12 @@ async def create_session(db: aiosqlite.Connection, user_id: int) -> str:
 
 async def get_session(db: aiosqlite.Connection, token: str) -> Optional[dict]:
     async with db.execute(
-        "SELECT token, user_id, expires_at FROM sessions WHERE token = ?", (token,)
+        """
+        SELECT s.token, s.user_id, s.expires_at, u.is_admin
+        FROM sessions s JOIN users u ON s.user_id = u.id
+        WHERE s.token = ?
+        """,
+        (token,),
     ) as cursor:
         row = await cursor.fetchone()
     if not row:
@@ -186,14 +207,110 @@ async def get_history_for_display(
     return [dict(r) for r in rows]
 
 
-# ── Streaming background save ─────────────────────────────────────────────────
+# ── Summary CRUD ──────────────────────────────────────────────────────────────
+
+async def get_summary(db: aiosqlite.Connection, user_id: int) -> Optional[dict]:
+    """Return {content, covered_count} or None."""
+    async with db.execute(
+        "SELECT content, covered_count FROM summaries WHERE user_id = ?", (user_id,)
+    ) as cursor:
+        row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+async def upsert_summary(
+    db: aiosqlite.Connection, user_id: int, content: str, covered_count: int
+) -> None:
+    await db.execute(
+        """
+        INSERT INTO summaries (user_id, content, covered_count, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            content       = excluded.content,
+            covered_count = excluded.covered_count,
+            updated_at    = excluded.updated_at
+        """,
+        (user_id, content, covered_count, time.time()),
+    )
+    await db.commit()
+
+
+async def _get_oldest_n_messages(
+    db: aiosqlite.Connection, user_id: int, n: int
+) -> list[dict]:
+    """Return the chronologically first `n` messages for this user."""
+    async with db.execute(
+        "SELECT role, content FROM messages WHERE user_id = ? ORDER BY created_at ASC LIMIT ?",
+        (user_id, n),
+    ) as cursor:
+        rows = await cursor.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def _get_total_message_count(db: aiosqlite.Connection, user_id: int) -> int:
+    async with db.execute(
+        "SELECT COUNT(*) FROM messages WHERE user_id = ?", (user_id,)
+    ) as cursor:
+        return (await cursor.fetchone())[0]
+
+
+async def _generate_summary(messages: list[dict]) -> str:
+    """Call the LLM to compress a list of messages into a paragraph summary."""
+    conv_text = "\n".join(
+        f"{m['role'].upper()}: {m['content']}" for m in messages
+    )
+    prompt = (
+        "Summarize the following conversation history into a concise paragraph. "
+        "Capture key topics, facts, decisions, and any personal details the user shared. "
+        "Write in third person (e.g. 'The user asked about...', 'The assistant explained...'). "
+        "Be specific — this summary will be the only record of these earlier messages.\n\n"
+        f"{conv_text}\n\nSUMMARY:"
+    )
+    payload = {
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 512,
+        "temperature": 0.3,
+        "stream": False,
+    }
+    if settings.allowed_model:
+        payload["model"] = settings.allowed_model
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+            resp = await client.post(
+                f"{settings.llama_base_url}/v1/chat/completions", json=payload
+            )
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    except Exception:
+        return ""
+
+
+# ── Streaming background save + summarization ─────────────────────────────────
 
 async def save_turn_background(
     db_path: str, user_id: int, user_content: str, assistant_content: str
 ) -> None:
-    """Opens its own connection — safe to call after the request's DB dep has closed."""
+    """Save a turn then conditionally regenerate the rolling summary."""
     async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
         await save_message_pair(db, user_id, user_content, assistant_content)
+
+        total = await _get_total_message_count(db, user_id)
+        n = settings.history_context_messages
+        old_count = total - n          # messages that fall outside the live window
+
+        if old_count <= 0:
+            return
+
+        existing = await get_summary(db, user_id)
+        covered  = existing["covered_count"] if existing else 0
+
+        # Regenerate when enough new messages have accumulated outside the live window
+        if (old_count - covered) >= settings.summary_update_every:
+            msgs_to_summarise = await _get_oldest_n_messages(db, user_id, old_count)
+            summary_text = await _generate_summary(msgs_to_summarise)
+            if summary_text:
+                await upsert_summary(db, user_id, summary_text, old_count)
 
 
 # ── SSE token extraction (sync helper used inside streamer) ───────────────────

@@ -112,7 +112,7 @@
         <span class="nav-label">Knowledge Search</span>
       </a>
 
-      <a class="nav-item" data-section="admin" href="#">
+      <a class="nav-item" data-section="admin" href="#" id="adminNavItem" style="display:none">
         <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.4"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
         <span class="nav-label">Admin</span>
       </a>
@@ -243,7 +243,7 @@
               <div class="composer-inner">
                 <textarea id="userPrompt" placeholder="Message the model…" rows="1"></textarea>
                 <div class="composer-toolbar">
-                  <div class="composer-controls">
+                  <div class="composer-controls" id="composerControls" style="display:none">
                     <label class="ctrl-chip">
                       <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1 5.5h9M5.5 1v9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
                       Tokens

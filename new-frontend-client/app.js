@@ -81,7 +81,7 @@ let msgCount    = 0;
 let toastTimer  = null;
 let lastRaw     = "—";
 let lastSearch  = "";
-let currentUser = null;  // { token, username, user_id } or null
+let currentUser = null;  // { token, username, user_id, is_admin } or null
 
 // ── Toast ─────────────────────────────────────────────
 function showToast(msg, type = "info", duration = 2800) {
@@ -331,8 +331,46 @@ function appendThinking() {
   return wrap;
 }
 
+// ── Message classifier (used for non-admin users) ─────
+function classifyMessage(text) {
+  const lower     = text.toLowerCase().trim();
+  const wordCount = lower.split(/\s+/).length;
+
+  // Temperature
+  let temperature = 0.72;
+  if (/\b(write|create|imagine|story|poem|creative|brainstorm|idea|invent|fiction|generate|design|craft|compose|narrative|character|plot|song|lyrics|script|roleplay|fantasy)\b/.test(lower))
+    temperature = 0.92;
+  else if (/\b(analyz|analys|compare|evaluat|pros|cons|difference|versus|\bvs\b|review|assess|contrast|weigh|opinion|argue|debate)\b/.test(lower))
+    temperature = 0.5;
+  else if (/\b(what is|what are|how does|how do|explain|define|calculat|convert|translat|syntax|error|bug|fix|debug|code|function|class|implement|api|formula|equation)\b/.test(lower))
+    temperature = 0.25;
+
+  // max_tokens — scale with length, higher ceiling now that limit is 4096
+  let max_tokens = Math.min(Math.max(200 + wordCount * 20, 300), 1800);
+  if (/\b(essay|detailed|comprehensive|complete|full|entire|step.by.step|tutorial|guide|list all|everything about|in depth|thorough|exhaustive|long)\b/.test(lower))
+    max_tokens = 4096;
+  else if (/\b(story|narrative|chapter|short story|fiction|script|write me a|tell me a)\b/.test(lower))
+    max_tokens = 3000;
+  else if (wordCount <= 6 && /^(what is|what are|who is|when|where|define|yes|no)/.test(lower))
+    max_tokens = 150;
+
+  return { temperature, max_tokens };
+}
+
+// ── Admin role UI toggle ───────────────────────────────
+function applyUserRole(isAdmin) {
+  const adminNav      = document.getElementById("adminNavItem");
+  const composerCtrl  = document.getElementById("composerControls");
+  if (adminNav)     adminNav.style.display     = isAdmin ? "" : "none";
+  if (composerCtrl) composerCtrl.style.display = isAdmin ? "" : "none";
+}
+
 // ── Streaming helper ──────────────────────────────────
-async function streamCompletion(payload, onToken, onDone, onError) {
+// onToken(token)          — called for each real content token
+// onReasoning(token)      — called for each reasoning/thinking token (optional)
+// onDone()                — called when stream ends
+// onError(err)            — called on fetch/parse error
+async function streamCompletion(payload, onToken, onDone, onError, onReasoning) {
   const url = `${getBaseUrl()}/v1/chat/completions`;
   let resp;
   try {
@@ -374,8 +412,9 @@ async function streamCompletion(payload, onToken, onDone, onError) {
         if (data === "[DONE]") { onDone(); return; }
         try {
           const parsed = JSON.parse(data);
-          const token  = parsed?.choices?.[0]?.delta?.content;
-          if (token) onToken(token);
+          const delta  = parsed?.choices?.[0]?.delta ?? {};
+          if (delta.content)           onToken(delta.content);
+          if (delta.reasoning_content && onReasoning) onReasoning(delta.reasoning_content);
         } catch { /* ignore malformed chunks */ }
       }
     }
@@ -409,23 +448,29 @@ sendBtn.addEventListener("click", async () => {
   if (sp) messages.push({ role: "system", content: sp });
   messages.push({ role: "user", content: prompt });
 
+  const inferredParams = currentUser?.is_admin
+    ? { max_tokens: Number(maxTokensEl.value) || undefined, temperature: Number(temperatureEl.value) || undefined }
+    : classifyMessage(prompt);
+
   const payload = {
-    model:       modelEl.value.trim() || undefined,
+    model:                 modelEl.value.trim() || undefined,
     messages,
-    max_tokens:  Number(maxTokensEl.value) || undefined,
-    temperature: Number(temperatureEl.value) || undefined,
+    chat_template_kwargs:  { enable_thinking: false },
+    ...inferredParams,
   };
 
   const t0 = Date.now();
-  let assistBody = null;
-  let fullText   = "";
+  let assistBody    = null;
+  let fullText      = "";
+  let reasoningText = "";
+  let reasoningEl   = null;  // <details> inside thinking bubble
 
   await streamCompletion(
     payload,
     (token) => {
       if (!assistBody) {
         thinking.remove();
-        // Build the assistant bubble on first token
+        // Build the assistant bubble on first content token
         const wrap   = document.createElement("div");
         wrap.className = "msg assist";
         const avatar = document.createElement("div");
@@ -472,6 +517,26 @@ sendBtn.addEventListener("click", async () => {
       setTimeout(() => setStatus("idle", "Idle"), 3500);
       sendBtn.disabled = false;
       sendBtn.querySelector(".send-label").textContent = "Send";
+    },
+    (rToken) => {
+      // Show reasoning tokens inside the thinking bubble as a live preview
+      reasoningText += rToken;
+      if (!reasoningEl) {
+        const details  = document.createElement("details");
+        details.className = "thinking-reasoning";
+        const summary  = document.createElement("summary");
+        summary.textContent = "Thinking…";
+        const pre      = document.createElement("pre");
+        pre.className  = "thinking-reasoning-text";
+        details.appendChild(summary);
+        details.appendChild(pre);
+        // Replace the dots spinner with this
+        const thinkBody = thinking.querySelector(".msg-body");
+        if (thinkBody) { thinkBody.innerHTML = ""; thinkBody.appendChild(details); }
+        reasoningEl = pre;
+      }
+      reasoningEl.textContent = reasoningText;
+      chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
     }
   );
 });
@@ -527,11 +592,15 @@ async function doSearch(query) {
   if (sp) messages.push({ role: "system", content: sp });
   messages.push({ role: "user", content: query });
 
+  const searchParams = currentUser?.is_admin
+    ? { max_tokens: Number(maxTokensEl.value) || undefined, temperature: 0.3 }
+    : classifyMessage(query);
+
   const payload = {
-    model:       modelEl.value.trim() || undefined,
+    model:                modelEl.value.trim() || undefined,
     messages,
-    max_tokens:  Number(maxTokensEl.value) || undefined,
-    temperature: 0.3,
+    chat_template_kwargs: { enable_thinking: false },
+    ...searchParams,
   };
 
   let accumulated = "";
@@ -663,10 +732,12 @@ registerFormEl.addEventListener("submit", async (e) => {
 });
 
 async function onLoginSuccess(data) {
-  currentUser = { token: data.token, username: data.username, user_id: data.user_id };
+  currentUser = { token: data.token, username: data.username, user_id: data.user_id, is_admin: !!data.is_admin };
   sessionStorage.setItem("sm_token",    data.token);
   sessionStorage.setItem("sm_username", data.username);
   sessionStorage.setItem("sm_user_id",  String(data.user_id));
+  sessionStorage.setItem("sm_is_admin", data.is_admin ? "1" : "0");
+  applyUserRole(!!data.is_admin);
 
   authOverlayEl.style.display = "none";
   userPillEl.style.display    = "";
@@ -681,12 +752,14 @@ function restoreSession() {
   const token    = sessionStorage.getItem("sm_token");
   const username = sessionStorage.getItem("sm_username");
   const user_id  = sessionStorage.getItem("sm_user_id");
+  const is_admin = sessionStorage.getItem("sm_is_admin") === "1";
   if (token && username && user_id) {
-    currentUser = { token, username, user_id: Number(user_id) };
+    currentUser = { token, username, user_id: Number(user_id), is_admin };
     authOverlayEl.style.display = "none";
     userPillEl.style.display    = "";
     userPillEl.textContent      = username;
     logoutBtnEl.style.display   = "";
+    applyUserRole(is_admin);
     return true;
   }
   return false;
@@ -700,6 +773,8 @@ logoutBtnEl.addEventListener("click", async () => {
   sessionStorage.removeItem("sm_token");
   sessionStorage.removeItem("sm_username");
   sessionStorage.removeItem("sm_user_id");
+  sessionStorage.removeItem("sm_is_admin");
+  applyUserRole(false);
   authOverlayEl.style.display = "";
   userPillEl.style.display    = "none";
   logoutBtnEl.style.display   = "none";

@@ -14,6 +14,8 @@ class ChatCompletionsRequest(BaseModel):
     max_tokens: int | None = None
     temperature: float | None = None
     stream: bool | None = False
+    enable_thinking: bool | None = None
+    chat_template_kwargs: dict | None = None
 
     def total_prompt_chars(self) -> int:
         return sum(len(m.content) for m in self.messages)
@@ -39,6 +41,7 @@ class AuthResponse(BaseModel):
     token: str
     username: str
     user_id: int
+    is_admin: bool
 
 
 class HistoryMessage(BaseModel):

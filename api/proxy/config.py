@@ -31,10 +31,16 @@ class Settings:
     db_path: str = os.getenv("DB_PATH", "stackmind.db")
     history_context_messages: int = _int_env("HISTORY_CONTEXT_MESSAGES", 20)
     session_ttl_days: int = _int_env("SESSION_TTL_DAYS", 30)
+    summary_update_every: int = _int_env("SUMMARY_UPDATE_EVERY", 10)
+    admin_usernames_raw: str = os.getenv("ADMIN_USERNAMES", "")
 
     @property
     def api_keys(self) -> set[str]:
         return {key.strip() for key in self.api_keys_raw.split(",") if key.strip()}
+
+    @property
+    def admin_usernames(self) -> set[str]:
+        return {u.strip() for u in self.admin_usernames_raw.split(",") if u.strip()}
 
     @property
     def session_ttl_seconds(self) -> int:

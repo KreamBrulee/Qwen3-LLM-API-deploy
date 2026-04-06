@@ -3,7 +3,9 @@
     "allow": [
       "Bash(python -m uvicorn api.proxy.main:app --host 127.0.0.1 --port 8001)",
       "Bash(curl -s http://127.0.0.1:8001/healthz)",
-      "Bash(kill %1)"
+      "Bash(kill %1)",
+      "Bash(curl -s -X POST http://127.0.0.1:8080/v1/chat/completions -H 'Content-Type: application/json' -d '{\"messages\":[{\"role\":\"user\",\"content\":\"say hi\"}],\"stream\":true}' --max-time 60)",
+      "Bash(curl -s -X POST http://127.0.0.1:8001/v1/chat/completions -H 'Content-Type: application/json' -H 'Authorization: Bearer goodassapikey1' -d '{\"messages\":[{\"role\":\"user\",\"content\":\"say hi\"}],\"stream\":true,\"enable_thinking\":false}' --max-time 60)"
     ]
   }
 }
