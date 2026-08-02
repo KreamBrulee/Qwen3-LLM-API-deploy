@@ -112,7 +112,7 @@ $apiKey = "YOUR_API_KEY"
 $headers = @{ Authorization = "Bearer $apiKey" }
 
 $body = @{
-  model = "qwen3-14b-q4_k_m"
+  model = "qwen25-coder-3b-stackoverflow-q4_k_m"
   messages = @(
     @{ role = "system"; content = "You are a concise assistant." },
     @{ role = "user"; content = "Give me 3 bullet points on GPU memory optimization." }
@@ -131,7 +131,7 @@ curl -X POST "http://127.0.0.1:8001/v1/chat/completions" \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen3-14b-q4_k_m",
+    "model": "qwen25-coder-3b-stackoverflow-q4_k_m",
     "messages": [
       {"role": "system", "content": "You are a concise assistant."},
       {"role": "user", "content": "Explain quantization in simple terms."}
@@ -157,7 +157,7 @@ curl -N -X POST "http://127.0.0.1:8001/v1/chat/completions" \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen3-14b-q4_k_m",
+    "model": "qwen25-coder-3b-stackoverflow-q4_k_m",
     "stream": true,
     "messages": [
       {"role": "user", "content": "Write a short poem about local inference."}

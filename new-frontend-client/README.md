@@ -8,12 +8,14 @@ A simple isolated browser UI for your proxy API domain.
 - styles.css: styles
 - app.js: API calls and chat logic
 
+This is an older iteration of the UI, kept for reference. The current primary UI is `frontend-new-new-new/frontend-client/` — see the repository root [README.md](../README.md).
+
 ## Run locally
 
 From the repository root:
 
 ~~~powershell
-cd e:\Kunal\VS_shit\LLM-deploy\frontend-client
+cd new-frontend-client
 python -m http.server 5500
 ~~~
 
@@ -28,8 +30,8 @@ Open:
 
 2. Paste API key (Bearer token only, without the word Bearer).
 
-3. Keep model as:
-- qwen3-14b-q4_k_m
+3. Keep model as whatever `ALLOWED_MODEL` is set to in `.env`, e.g.:
+- qwen25-coder-3b-stackoverflow-q4_k_m
 
 4. Click Check Health, then List Models.
 

@@ -12,7 +12,7 @@ $headers = @{ Authorization = "Bearer $apiKey" }
 Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8001/v1/models" -Headers $headers
 
 $body = @{
-  model = "qwen3-14b-q4_k_m"
+  model = "qwen25-coder-3b-stackoverflow-q4_k_m"
   messages = @(
     @{ role = "system"; content = "You are a concise assistant." },
     @{ role = "user"; content = "Reply with: service online" }

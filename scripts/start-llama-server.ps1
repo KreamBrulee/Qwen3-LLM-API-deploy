@@ -7,7 +7,7 @@ param(
     [int]$ContextSize = 4096,
     [int]$Threads = 8,
     [int]$BatchSize = 512,
-    [string]$LlamaServerPath = ".\\E:\\llm\\bin\\llama-server.exe"
+    [string]$LlamaServerPath = "E:\llm\bin\llama-server.exe"
 )
 
 if (-not (Test-Path $ModelPath)) {

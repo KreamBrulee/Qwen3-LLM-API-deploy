@@ -8,12 +8,14 @@ A simple isolated browser UI for your proxy API domain.
 - styles.css: styles
 - app.js: API calls and chat logic
 
+This is the primary StackMind UI (see the repository root [README.md](../../README.md)).
+
 ## Run locally
 
 From the repository root:
 
 ~~~powershell
-cd e:\Kunal\VS_shit\LLM-deploy\frontend-client
+cd frontend-new-new-new\frontend-client
 python -m http.server 5500
 ~~~
 
@@ -23,13 +25,14 @@ Open:
 
 ## How to use
 
-1. Set API Base URL to your public endpoint, for example:
-- https://llm-api.example.com
+1. Set API Base URL to your endpoint, for example:
+- http://127.0.0.1:8001 (local)
+- your Cloudflare domain (public)
 
-2. Paste API key (Bearer token only, without the word Bearer).
+2. Paste API key (Bearer token only, without the word Bearer) or sign in with a user account.
 
-3. Keep model as:
-- qwen3-14b-q4_k_m
+3. Keep model as whatever `ALLOWED_MODEL` is set to in `.env`, e.g.:
+- qwen25-coder-3b-stackoverflow-q4_k_m
 
 4. Click Check Health, then List Models.
 

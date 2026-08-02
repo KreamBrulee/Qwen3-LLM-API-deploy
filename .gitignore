@@ -9,6 +9,9 @@ __pycache__/
 .env
 deploy/deploy.settings.json
 
+# Local database (contains user accounts/sessions — never commit)
+stackmind.db
+
 # IDE
 .vscode/
 
