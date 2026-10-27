@@ -11,3 +11,4 @@ langchain-openai>=1.1,<2.0   # OpenAI-compatible chat model client (works with l
 langgraph>=1.2,<2.0          # stateful graph orchestration
 python-dotenv>=1.0           # already in main reqs; listed so these scripts are self-contained
 grandalf>=0.8                # lets graph.get_graph().draw_ascii() render the graph in the terminal
+ipykernel>=6.29             # Jupyter kernel so VS Code / Jupyter can run the lesson notebooks against this venv
