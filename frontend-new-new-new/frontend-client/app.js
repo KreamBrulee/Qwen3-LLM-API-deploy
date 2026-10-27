@@ -5,6 +5,7 @@
 
 // ── Element refs ──────────────────────────────────────
 const apiBaseEl       = document.getElementById("apiBase");
+const apiVersionEl    = document.getElementById("apiVersion");
 const apiKeyEl        = document.getElementById("apiKey");
 const modelEl         = document.getElementById("model");
 const systemPromptEl  = document.getElementById("systemPrompt");
@@ -877,12 +878,56 @@ stopBtn.addEventListener("click", () => {
 });
 
 // ── Send chat ─────────────────────────────────────────
+// ── v2: the basic LangChain pipeline endpoint ─────────
+// v2 is non-streaming: we POST {message} and get back {reply} in one shot.
+// Much simpler than the v1 streaming path — no SSE parsing.
+async function sendV2(prompt) {
+  appendMessage("user", prompt);
+  userPromptEl.value = "";
+  userPromptEl.style.height = "auto";
+
+  const thinking = appendThinking();
+  setStatus("busy", "Waiting…");
+  enterGeneratingState();
+
+  const t0 = Date.now();
+  try {
+    const data = await callJson("/v2/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: prompt }),
+    });
+    thinking.remove();
+    appendMessage("assist", data.reply || "—");
+    printChat(data.reply || "—");
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+    printMeta({ endpoint: "/v2/chat", streamed: false, elapsed_s: Number(elapsed) });
+    setStatus("ok", "Done");
+    showToast("v2 response received", "success");
+  } catch (err) {
+    thinking.remove();
+    appendMessage("assist", `Error: ${err.message}`);
+    printChat(err.message);
+    setStatus("error", "Error");
+    showToast(err.message, "error", 4000);
+  } finally {
+    setTimeout(() => setStatus("idle", "Idle"), 2500);
+    exitGeneratingState();
+  }
+}
+
 sendBtn.addEventListener("click", async () => {
   const prompt = userPromptEl.value.trim();
   if (!prompt) {
     userPromptEl.focus();
     userPromptEl.style.border = "1px solid var(--red)";
     setTimeout(() => { userPromptEl.style.border = ""; }, 1200);
+    return;
+  }
+
+  // v2 endpoint: take the simple non-streaming path, then stop.
+  if (apiVersionEl && apiVersionEl.value === "v2") {
+    await sendV2(prompt);
     return;
   }
 
