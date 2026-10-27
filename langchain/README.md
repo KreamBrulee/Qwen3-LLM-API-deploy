@@ -13,6 +13,14 @@ llama.cpp server. Nothing here touches the production proxy in `api/proxy/`.
 That installs LangChain, LangGraph, and `ipykernel` (the Jupyter kernel that
 lets VS Code run these notebooks against this venv).
 
+> **If `ipykernel` fails to install** (slow/flaky PyPI connection — it was
+> timing out when this was set up), the notebooks are still fine. Either let
+> VS Code's Python/Jupyter extension supply a kernel, or install it on its own
+> once your network is cooperating:
+> ```powershell
+> .venv\Scripts\python -m pip install ipykernel --timeout 120 --retries 10
+> ```
+
 ## Running a notebook
 
 1. Start your llama.cpp server so it's live at `http://127.0.0.1:8080`
