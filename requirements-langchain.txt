@@ -1,0 +1,13 @@
+# LangChain / LangGraph learning dependencies.
+# Kept separate from requirements.txt so the production proxy stays lean.
+# Install into the project venv with:
+#     .venv\Scripts\python -m pip install -r requirements-langchain.txt
+#
+# Version ranges (not exact pins) so pip fetches the latest compatible 1.x
+# builds. The 1.x line is the current stable series as of late 2026.
+
+langchain>=1.2,<2.0          # core chains, prompts, runnables
+langchain-openai>=1.1,<2.0   # OpenAI-compatible chat model client (works with llama.cpp)
+langgraph>=1.2,<2.0          # stateful graph orchestration
+python-dotenv>=1.0           # already in main reqs; listed so these scripts are self-contained
+grandalf>=0.8                # lets graph.get_graph().draw_ascii() render the graph in the terminal
