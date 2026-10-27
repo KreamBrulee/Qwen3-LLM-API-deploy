@@ -15,7 +15,10 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from pydantic import BaseModel
+
 from .config import settings
+from .v2 import run_pipeline
 from .database import (
     create_session,
     create_user,
@@ -332,3 +335,17 @@ async def chat_completions(
             content["proxy_metadata"]["latency_ms"] = latency_ms
 
     return JSONResponse(status_code=upstream.status_code, content=content)
+
+
+# ── v2: basic LangChain pipeline ────────────────────────────────────────────
+# A deliberately minimal endpoint for learning LangChain. No history, no
+# streaming, no auth — just: message in, run the chain, reply out.
+
+class V2ChatRequest(BaseModel):
+    message: str
+
+
+@app.post("/v2/chat")
+async def v2_chat(payload: V2ChatRequest = Body(...)) -> dict:
+    reply = await run_pipeline(payload.message)
+    return {"reply": reply}
