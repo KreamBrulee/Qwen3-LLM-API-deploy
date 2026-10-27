@@ -38,9 +38,17 @@ lets VS Code run these notebooks against this venv).
 | `02_prompt_and_chain.ipynb` | Prompt templates + the `\|` pipe (LCEL) | `database.py:259-283` (`_generate_summary`) |
 | `03_streaming.ipynb` | `.stream()` token-by-token | `database.py:318-332` (SSE parsing) |
 | `04_langgraph_basics.ipynb` | State, nodes, edges — a graph | `main.py:231-327` (`chat_completions`) |
+| `05_agent_tool_loop.ipynb` | Conditional edges; the agent/tool loop | (proxy has no tool loop — this is new ground) |
+| `06_persistent_memory.ipynb` | Checkpointers; `thread_id`; durable state | `database.py` save/load + `stackmind.db` |
 
 Each notebook has the matching proxy snippet inline in a markdown cell, so you
 can read "the old way" right above "the LangChain way."
+
+> **Lesson 6's last cell** (durable SQLite memory) needs one extra package:
+> `.venv\Scripts\python -m pip install langgraph-checkpoint-sqlite`
+> Everything else in 05 and 06 runs with what's already installed. The cell
+> catches the missing package and prints this command, so the notebook won't
+> crash if you skip it.
 
 ## The core idea
 
@@ -66,9 +74,13 @@ chain can't.
   partial updates merged in via "reducers" like `add_messages`.
 - **Node** — a function `state -> dict`. **Edge** — wiring between nodes.
 
-## Next up (not built yet)
+## Where to go after the six lessons
 
-- `05` — a **conditional edge**: let the model decide whether to call a tool,
-  then loop back. The "agent" pattern and the real reason LangGraph exists.
-- `06` — **persistent memory** with a LangGraph SQLite checkpointer, the
-  principled version of your `save_turn_background` + history logic.
+You've covered the core. Good things to build yourself next:
+
+- Add a **summary node** to the Lesson 6 graph that compresses old turns —
+  LangGraph's version of your `_generate_summary` rolling summary.
+- Turn Lesson 5's agent into a real tool over your own data (e.g. a tool that
+  queries `stackmind.db`).
+- Compare `create_react_agent` (LangGraph's prebuilt agent) against the
+  hand-wired loop in Lesson 5 to see what the one-liner hides.
