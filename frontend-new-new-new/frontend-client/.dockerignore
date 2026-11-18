@@ -1,0 +1,7 @@
+# Keep the build context tiny — nothing here needs to go into the image.
+.DS_Store
+.python-version
+README.md
+Dockerfile
+docker-compose.yml
+.dockerignore

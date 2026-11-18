@@ -5,23 +5,40 @@ A simple isolated browser UI for your proxy API domain.
 ## Files
 
 - index.html: UI layout
-- styles.css: styles
+- styles.css / retro.css: styles
 - app.js: API calls and chat logic
+- retro.js: retro UI effects
+- Dockerfile / nginx.conf / docker-compose.yml: deployment (static files via nginx)
 
 This is the primary StackMind UI (see the repository root [README.md](../../README.md)).
 
-## Run locally
+The UI is plain static files — no build step. The API base URL is set in the UI
+(default: `https://stackmind.potassulfide.com`), so the frontend can be hosted
+anywhere independent of the API.
 
-From the repository root:
+## Run with Docker (recommended — no Python needed)
+
+From this folder:
+
+~~~bash
+docker compose up -d
+~~~
+
+Open http://localhost:8088 (change the host port in `docker-compose.yml`).
+
+Stop it with `docker compose down`. To rebuild after editing the files, add
+`--build`: `docker compose up -d --build`.
+
+## Run locally without Docker
+
+Any static file server works, e.g.:
 
 ~~~powershell
 cd frontend-new-new-new\frontend-client
 python -m http.server 5500
 ~~~
 
-Open:
-
-- http://127.0.0.1:5500
+Open http://127.0.0.1:5500
 
 ## How to use
 
