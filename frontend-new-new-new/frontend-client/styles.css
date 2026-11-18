@@ -3044,6 +3044,63 @@ body:not(.logged-in) .shell {
   letter-spacing: 0.02em;
 }
 
+/* ── Offline / demo entry (shown only when API unreachable) ── */
+.auth-offline-btn {
+  margin: 0 24px 4px;
+  padding: 10px 12px;
+  width: calc(100% - 48px);
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid var(--amber, #eab308);
+  border-radius: var(--radius-sm);
+  color: var(--amber, #eab308);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.auth-offline-btn:hover { background: rgba(234, 179, 8, 0.2); }
+
+/* ── Hidden debug endpoint switcher ── */
+.auth-debug {
+  margin: 0 24px 8px;
+  padding: 10px 12px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.03));
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+.auth-debug label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 6px;
+  letter-spacing: 0.02em;
+}
+.auth-debug-row { display: flex; gap: 6px; }
+.auth-debug-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  font-size: 12px;
+  background: var(--bg, #0e1116);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg, inherit);
+}
+.auth-debug-apply {
+  padding: 7px 12px;
+  font-size: 12px;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  cursor: pointer;
+}
+.auth-debug-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
 /* ── Auth responsive: stack on mobile ── */
 @media (max-width: 700px) {
   .auth-card-wide {

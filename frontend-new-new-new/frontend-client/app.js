@@ -78,6 +78,11 @@ const loginPasswordEl  = document.getElementById("loginPassword");
 const regUsernameEl    = document.getElementById("regUsername");
 const regPasswordEl    = document.getElementById("regPassword");
 const authErrorEl      = document.getElementById("authError");
+const offlineEnterBtn  = document.getElementById("offlineEnterBtn");
+const authDebugEl      = document.getElementById("authDebug");
+const debugApiBaseEl   = document.getElementById("debugApiBase");
+const debugApplyBtn    = document.getElementById("debugApplyBtn");
+const authLogoEl       = document.querySelector(".auth-logo");
 const logoutBtnEl      = document.getElementById("logoutBtn");
 const userPillEl       = document.getElementById("userPill");
 const profileDropdownEl= document.getElementById("profileDropdown");
@@ -1115,6 +1120,8 @@ cfgSaveBtn.addEventListener("click", () => {
   apiBaseEl.value = cfgApiBaseEl.value;
   apiKeyEl.value  = cfgApiKeyEl.value;
   modelEl.value   = cfgModelEl.value;
+  // Remember the base URL across reloads so we never fall back to a dead default.
+  try { localStorage.setItem("sm_api_base", getBaseUrl()); } catch {}
   syncDashboard();
   showToast("Configuration applied", "success");
   addActivity("config", "Configuration updated");
@@ -1158,6 +1165,71 @@ function showAuthError(msg) {
   authErrorEl.style.display = "block";
 }
 
+// ── Offline detection ─────────────────────────────────
+// callJson throws "HTTP <status>: ..." when the server WAS reached (401, 409,
+// 500...). A real network failure (server unreachable) throws a TypeError from
+// fetch whose message does NOT start with "HTTP". We only offer demo mode in
+// that second case — i.e. the API returned nothing at all.
+function isNetworkError(err) {
+  return !!err && typeof err.message === "string" && !err.message.includes("HTTP ");
+}
+
+function maybeShowOffline(err) {
+  if (offlineEnterBtn && isNetworkError(err)) {
+    offlineEnterBtn.style.display = "block";
+  }
+}
+
+// Enter the UI without server auth. Only reachable via the offline button,
+// which only appears when the API is unreachable.
+async function enterDemoMode() {
+  currentUser = null;                 // no token — stays unauthenticated
+  if (offlineEnterBtn) offlineEnterBtn.style.display = "none";
+  if (profileDropdownEl) profileDropdownEl.style.display = "";
+  if (avatarLetterEl) avatarLetterEl.textContent = "D";
+  if (profileMenuNameEl) profileMenuNameEl.textContent = "Demo";
+  if (profileMenuRoleEl) profileMenuRoleEl.textContent = "offline";
+  applyUserRole(false);
+  await playLoginAnimation("Demo");
+  showToast("Demo mode — server unreachable, no data will be saved", "info", 4000);
+}
+
+if (offlineEnterBtn) {
+  offlineEnterBtn.addEventListener("click", () => { enterDemoMode(); });
+}
+
+// ── Hidden debug: click the logo 5x to reveal the endpoint switcher ──
+let _logoClicks = 0;
+let _logoTimer  = null;
+if (authLogoEl) {
+  authLogoEl.addEventListener("click", () => {
+    _logoClicks++;
+    clearTimeout(_logoTimer);
+    _logoTimer = setTimeout(() => { _logoClicks = 0; }, 1500);
+    if (_logoClicks >= 5) {
+      _logoClicks = 0;
+      if (authDebugEl) {
+        authDebugEl.style.display = authDebugEl.style.display === "none" ? "block" : "none";
+        if (debugApiBaseEl) debugApiBaseEl.value = getBaseUrl();
+      }
+    }
+  });
+}
+
+if (debugApplyBtn) {
+  debugApplyBtn.addEventListener("click", () => {
+    const v = debugApiBaseEl.value.trim().replace(/\/$/, "");
+    if (!v) return;
+    apiBaseEl.value = v;
+    if (cfgApiBaseEl) cfgApiBaseEl.value = v;
+    try { localStorage.setItem("sm_api_base", v); } catch {}
+    syncDashboard();
+    // Clear any stale offline prompt — the next attempt uses the new endpoint.
+    if (offlineEnterBtn) offlineEnterBtn.style.display = "none";
+    showToast("API endpoint updated", "success");
+  });
+}
+
 loginFormEl.addEventListener("submit", async (e) => {
   e.preventDefault();
   const username = loginUsernameEl.value.trim();
@@ -1181,6 +1253,7 @@ loginFormEl.addEventListener("submit", async (e) => {
     document.body.classList.remove("logged-in");
     if (authOverlayEl) authOverlayEl.style.display = "";
     showAuthError(err.message.includes("401") ? "Invalid credentials." : err.message);
+    maybeShowOffline(err);
   } finally {
     btn.classList.remove("loading", "success");
     btn.innerHTML = '<span>Sign In</span><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 7h12M8 2l5 5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -1208,6 +1281,7 @@ registerFormEl.addEventListener("submit", async (e) => {
     await onLoginSuccess(data);
   } catch (err) {
     showAuthError(err.message.includes("409") ? "Username already taken." : err.message);
+    maybeShowOffline(err);
   } finally {
     btn.classList.remove("loading", "success");
     btn.innerHTML = '<span>Create Account</span><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 7h12M8 2l5 5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -1539,7 +1613,19 @@ async function loadAndRenderHistory() {
 }
 
 // ── Init ──────────────────────────────────────────────
+// Load a previously saved base URL (if any) so a good value survives reloads.
+function restoreApiBase() {
+  try {
+    const saved = localStorage.getItem("sm_api_base");
+    if (saved) {
+      apiBaseEl.value = saved;
+      if (cfgApiBaseEl) cfgApiBaseEl.value = saved;
+    }
+  } catch {}
+}
+
 (async function init() {
+  restoreApiBase();
   syncDashboard();
   if (restoreSession()) {
     await loadAndRenderHistory();
