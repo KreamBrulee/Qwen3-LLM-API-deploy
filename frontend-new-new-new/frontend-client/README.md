@@ -24,7 +24,7 @@ From this folder:
 docker compose up -d
 ~~~
 
-Open http://localhost:8088 (change the host port in `docker-compose.yml`).
+Open http://localhost:5500 (change the host port in `docker-compose.yml`).
 
 Stop it with `docker compose down`. To rebuild after editing the files, add
 `--build`: `docker compose up -d --build`.
